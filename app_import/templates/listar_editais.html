@@ -1,0 +1,51 @@
+
+{% extends "base.html" %}
+
+{% block title %}Editais Carregados{% endblock %}
+
+{% block content %}
+<h2>Editais Carregados</h2>
+
+<p><a href="{% url 'home' %}">Voltar para Upload</a></p>
+
+{% if editais %}
+    <table border="1" style="width:100%; border-collapse: collapse;">
+        <thead>
+            <tr>
+                <th>Tipo</th>
+                <th>Número/Ano</th>
+                <th>Carregado Por</th>
+                <th>Data Upload</th>
+                <th>Última Modificação Por</th>
+                <th>Data Modificação</th>
+                <th>Ações</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for edital in editais %}
+            <tr>
+                <td>{{ edital.get_tipo_display }}</td>
+                <td>{{ edital.numero_ano }}</td>
+                <td>{{ edital.uploaded_by.username|default:"N/A" }}</td>
+                <td>{{ edital.uploaded_at|date:"d/m/Y H:i" }}</td>
+                <td>{{ edital.last_modified_by.username|default:"N/A" }}</td>
+                <td>{{ edital.last_modified_at|date:"d/m/Y H:i" }}</td>
+                <td>
+                    {# Link para download do CSV #}
+                    <a href="{% url 'download_edital_csv' edital.id %}">Baixar CSV</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <p>Nenhum edital foi carregado ainda.</p>
+{% endif %}
+
+<hr>
+<form method="post" action="{% url 'logout' %}">
+    {% csrf_token %}
+    <button type="submit">Logout</button>
+</form>
+{% endblock %}
+
