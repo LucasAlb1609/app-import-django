@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% load custom_filters %}
+
+
+{% block title %}Detalhes do Edital{% endblock %}
+
+{% block content %}
+<h2>Detalhes do Edital: {{ edital.get_tipo_display }} - {{ edital.numero_ano }}</h2>
+
+<p>
+    <a href="{% url 'listar_editais' %}">Voltar para Lista de Editais</a> | 
+    <a href="{% url 'home' %}">Voltar para Upload</a>
+</p>
+
+<div class="info-edital">
+    <p><strong>Tipo:</strong> {{ edital.get_tipo_display }}</p>
+    <p><strong>Número/Ano:</strong> {{ edital.numero_ano }}</p>
+    <p><strong>Carregado por:</strong> {{ edital.uploaded_by.username|default:"N/A" }}</p>
+    <p><strong>Data de Upload:</strong> {{ edital.uploaded_at|date:"d/m/Y H:i" }}</p>
+    <p><strong>Última Modificação:</strong> {{ edital.last_modified_at|date:"d/m/Y H:i" }}</p>
+    <p><strong>Modificado por:</strong> {{ edital.last_modified_by.username|default:"N/A" }}</p>
+    <p><strong>Total de Inscritos:</strong> {{ total_inscritos }}</p>
+</div>
+
+<hr>
+
+<h3>Filtrar Inscritos</h3>
+
+<form method="get" action="{% url 'detalhe_edital' edital.id %}">
+    <div class="filtros">
+        {% for campo, valores in campos_filtro.items %}
+            <div class="filtro-campo">
+                <label for="filtro_{{ campo }}">{{ campo }}:</label>
+                <select name="filtro_{{ campo }}" id="filtro_{{ campo }}">
+                    <option value="">Todos</option>
+                    {% for valor in valores %}
+                        <option value="{{ valor }}" {% if valor == filtros_ativos|get_item:campo %}selected{% endif %}>{{ valor }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        {% endfor %}
+    </div>
+    
+    <div class="acoes-filtro">
+        <button type="submit">Aplicar Filtros</button>
+        <a href="{% url 'detalhe_edital' edital.id %}">Limpar Filtros</a>
+        <a href="{% url 'download_edital_csv' edital.id %}?{{ request.GET.urlencode }}">Baixar Resultados Filtrados (CSV)</a>
+    </div>
+</form>
+
+<hr>
+
+<h3>Inscritos ({{ page_obj.paginator.count }} resultados totais)</h3>
+
+{% if page_obj.object_list %}
+    <div class="tabela-container">
+        <table border="1" style="width:100%; border-collapse: collapse;">
+            <thead>
+                <tr>
+                    {% for coluna in colunas %}
+                        <th>{{ coluna }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for inscrito in page_obj.object_list %}
+                    <tr>
+                        {% for coluna in colunas %}
+                            <td>{{ inscrito.dados_linha|get_item:coluna|default:"-" }}</td>
+                        {% endfor %}
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% else %}
+    <p>Nenhum inscrito encontrado com os filtros aplicados.</p>
+{% endif %}
+
+<hr>
+
+{% if page_obj.has_other_pages %}
+<div class="pagination">
+    {% if page_obj.has_previous %}
+        <a href="?page={{ page_obj.previous_page_number }}{% for k,v in request.GET.items %}{% if k != 'page' %}&{{ k }}={{ v }}{% endif %}{% endfor %}">Anterior</a>
+    {% endif %}
+    <span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}
+        <a href="?page={{ page_obj.next_page_number }}{% for k,v in request.GET.items %}{% if k != 'page' %}&{{ k }}={{ v }}{% endif %}{% endfor %}">Próxima</a>
+    {% endif %}
+</div>
+{% endif %}
+
+<hr>
+<form method="post" action="{% url 'logout' %}">
+    {% csrf_token %}
+    <button type="submit">Logout</button>
+</form>
+
+{% endblock %}

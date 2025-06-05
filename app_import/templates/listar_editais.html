@@ -8,6 +8,7 @@
 
 <p><a href="{% url 'home' %}">Voltar para Upload</a></p>
 
+
 {% if editais %}
     <table border="1" style="width:100%; border-collapse: collapse;">
         <thead>
@@ -33,6 +34,8 @@
                 <td>
                     {# Link para download do CSV #}
                     <a href="{% url 'download_edital_csv' edital.id %}">Baixar CSV</a>
+                    {# Link para detalhes do edital #}
+                    <a href="{% url 'detalhe_edital' edital.id %}">Ver Inscritos</a>
                 </td>
             </tr>
             {% endfor %}

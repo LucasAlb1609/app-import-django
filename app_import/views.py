@@ -1,4 +1,3 @@
-# INÍCIO COMPLETO DO ARQUIVO views.py (SEM BARRAS INVERTIDAS INCORRETAS)
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.forms import UserCreationForm
 from django.urls import reverse_lazy, reverse
@@ -10,12 +9,14 @@ import io
 from django.db import transaction
 import traceback # Import traceback for better error logging
 from django.http import HttpResponse # Needed for CSV download
+from collections import defaultdict
+from django.core.paginator import Paginator # Importação para paginação
 
 from .forms import EditalCSVUploadForm
 from .models import ImportedData, Edital
 
 # View para cadastro de usuário
-class SignUpView(generic.CreateView ):
+class SignUpView(generic.CreateView):
     form_class = UserCreationForm
     success_url = reverse_lazy("login")
     template_name = "registration/signup.html"
@@ -144,8 +145,6 @@ def home(request):
 
     return render(request, "home.html", {"form": form})
 
-# --- FUNÇÕES DE LISTAGEM E DOWNLOAD --- 
-
 # Nova view para listar os editais
 @login_required
 def listar_editais(request):
@@ -156,9 +155,11 @@ def listar_editais(request):
 @login_required
 def download_edital_csv(request, edital_id):
     edital = get_object_or_404(Edital, pk=edital_id)
-    dados_importados = ImportedData.objects.filter(edital=edital)
-
-    if not dados_importados.exists():
+    
+    # Obter os dados filtrados se houver filtros ativos
+    inscritos_filtrados = filtrar_inscritos(request, edital)
+    
+    if not inscritos_filtrados.exists():
         messages.error(request, "Não há dados importados para este edital.")
         return redirect("listar_editais")
 
@@ -168,11 +169,11 @@ def download_edital_csv(request, edital_id):
     )
     response.write(u"\ufeff".encode("utf8"))
     
-    # Usar quotechar sem barras extras
     writer = csv.writer(response, delimiter=",", quotechar='"', quoting=csv.QUOTE_MINIMAL)
 
+    # Determinar o cabeçalho (todas as chaves únicas de todos os JSONs)
     headers = set()
-    all_rows_data = [item.dados_linha for item in dados_importados]
+    all_rows_data = [item.dados_linha for item in inscritos_filtrados]
     for row_data in all_rows_data:
         if isinstance(row_data, dict):
              headers.update(row_data.keys())
@@ -182,8 +183,113 @@ def download_edital_csv(request, edital_id):
 
     for row_data in all_rows_data:
         if isinstance(row_data, dict):
-            # Usar get com string vazia sem barras extras
             writer.writerow([row_data.get(header, '') for header in sorted_headers])
 
     return response
-# FIM COMPLETO DO ARQUIVO views.py
+
+# Nova view para detalhe do edital com filtros dinâmicos
+@login_required
+def detalhe_edital(request, edital_id):
+    edital = get_object_or_404(Edital, pk=edital_id)
+    
+    # Obter todos os inscritos deste edital
+    todos_inscritos = ImportedData.objects.filter(edital=edital)
+    total_inscritos = todos_inscritos.count()
+    
+    if total_inscritos == 0:
+        messages.warning(request, "Este edital não possui inscritos.")
+        return redirect("listar_editais")
+    
+    # Identificar todos os campos disponíveis e seus valores únicos
+    campos_filtro = identificar_campos_filtro(todos_inscritos)
+    
+    # Obter filtros ativos da query string
+    filtros_ativos = {}
+    for param, valor in request.GET.items():
+        if param.startswith('filtro_') and valor:
+            campo = param[7:]  # Remove 'filtro_' do início
+            filtros_ativos[campo] = valor
+    
+    # Filtrar inscritos com base nos filtros ativos
+    inscritos = filtrar_inscritos(request, edital)
+    
+    # Determinar todas as colunas para exibição na tabela
+    colunas = set()
+    for inscrito in inscritos:
+        if isinstance(inscrito.dados_linha, dict):
+            colunas.update(inscrito.dados_linha.keys())
+    colunas = sorted(list(colunas))
+
+    inscritos = filtrar_inscritos(request, edital)
+    paginator = Paginator(inscritos, 50)  # 50 itens por página
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    context = {
+        'edital': edital,
+        'inscritos': page_obj.object_list,
+        'total_inscritos': total_inscritos,
+        'campos_filtro': campos_filtro,
+        'filtros_ativos': filtros_ativos,
+        'colunas': colunas,
+        'page_obj': page_obj,
+    }
+    
+    return render(request, "detalhe_edital.html", context)
+
+
+# Função auxiliar para identificar campos e valores únicos para filtros
+def identificar_campos_filtro(inscritos):
+    """
+    Identifica todos os campos disponíveis nos dados dos inscritos
+    e seus valores únicos para criar filtros dinâmicos.
+    """
+    campos_valores = defaultdict(set)
+    
+    for inscrito in inscritos:
+        if not isinstance(inscrito.dados_linha, dict):
+            continue
+            
+        for campo, valor in inscrito.dados_linha.items():
+            # Ignorar campos vazios ou muito longos (provavelmente não são bons para filtrar)
+            if valor and isinstance(valor, str) and len(valor) < 100:
+                campos_valores[campo].add(valor)
+    
+    # Converter sets para listas ordenadas
+    return {campo: sorted(list(valores)) for campo, valores in campos_valores.items()}
+
+# Função auxiliar para filtrar inscritos com base nos parâmetros da query string
+def filtrar_inscritos(request, edital):
+    """
+    Filtra os inscritos de um edital com base nos filtros da query string.
+    """
+    inscritos = ImportedData.objects.filter(edital=edital)
+    
+    # Se não há filtros ativos, retorna todos os inscritos
+    if not any(param.startswith('filtro_') for param in request.GET):
+        return inscritos
+    
+    # Lista para armazenar os IDs dos inscritos que atendem a todos os filtros
+    ids_filtrados = []
+    
+    # Processa cada inscrito para verificar se atende a todos os filtros
+    for inscrito in inscritos:
+        atende_todos_filtros = True
+        
+        for param, valor in request.GET.items():
+            if param.startswith('filtro_') and valor:
+                campo = param[7:]  # Remove 'filtro_' do início
+                
+                # Verifica se o inscrito tem o campo e se o valor corresponde ao filtro
+                if (not isinstance(inscrito.dados_linha, dict) or 
+                    campo not in inscrito.dados_linha or 
+                    inscrito.dados_linha[campo] != valor):
+                    atende_todos_filtros = False
+                    break
+        
+        if atende_todos_filtros:
+            ids_filtrados.append(inscrito.id)
+    
+    # Retorna apenas os inscritos que atendem a todos os filtros
+    return inscritos.filter(id__in=ids_filtrados)
+
