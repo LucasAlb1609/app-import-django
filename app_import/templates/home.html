@@ -1,4 +1,3 @@
-
 {% extends "base.html" %}
 
 {% block title %}Homepage{% endblock %}
@@ -7,10 +6,12 @@
 <h2>Bem-vindo, {{ user.username }}!</h2>
 <p>Preencha os detalhes do edital e faça o upload do arquivo CSV para importar os dados.</p>
 
+{# Link para a página de consulta de editais #}
+<p><a href="{% url 'listar_editais' %}">Consultar Editais Carregados</a></p>
+
 {% if messages %}
     <ul class="messages">
         {% for message in messages %}
-            {# Adicionar classe CSS específica para warning para estilização se necessário #}
             <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message|safe }}</li>
         {% endfor %}
     </ul>
@@ -32,18 +33,15 @@
 
     {# Lógica para mostrar a confirmação de substituição #}
     {% if pedir_confirmacao %}
-        <p style="color: orange; font-weight: bold;">
-            Atenção: O edital {{ edital_existente.get_tipo_display }} - {{ edital_existente.numero_ano }} já existe.
-            Marque a caixa abaixo para confirmar a substituição dos dados existentes.
-        </p>
-        <label for="{{ form.confirmar_substituicao.id_for_label }}">
-            {{ form.confirmar_substituicao }} Confirmar Substituição
-        </label>
-        {{ form.confirmar_substituicao.errors }}
-        <br><br>
-    {% else %}
-        {# Renderizar o campo oculto normalmente se não for para pedir confirmação explicitamente #}
-        {{ form.confirmar_substituicao }}
+        <div style="border: 1px solid orange; padding: 10px; margin-bottom: 15px;">
+            <p style="color: orange; font-weight: bold;">
+                Atenção: O edital {{ edital_existente.get_tipo_display }} - {{ edital_existente.numero_ano }} já existe.
+                Marque a caixa abaixo para confirmar a substituição dos dados existentes.
+            </p>
+            {# Renderizar o campo confirmar_substituicao como checkbox visível #}
+            {{ form.confirmar_substituicao.label_tag }} {{ form.confirmar_substituicao }}
+            {{ form.confirmar_substituicao.errors }}
+        </div>
     {% endif %}
 
     <button type="submit">Upload CSV</button>
