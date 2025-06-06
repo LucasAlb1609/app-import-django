@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 {% load custom_filters %}
 
-
 {% block title %}Detalhes do Edital{% endblock %}
 
 {% block content %}
@@ -26,25 +25,142 @@
 
 <h3>Filtrar Inscritos</h3>
 
+<style>
+    .filtros-container {
+        margin-bottom: 20px;
+    }
+    .filtro-categoria {
+        border: 1px solid #ddd;
+        margin-bottom: 10px;
+        border-radius: 5px;
+    }
+    .filtro-categoria-header {
+        background-color: #f5f5f5;
+        padding: 10px;
+        cursor: pointer;
+        font-weight: bold;
+    }
+    .filtro-categoria-content {
+        padding: 10px;
+        display: none;
+    }
+    .filtro-categoria-content.active {
+        display: block;
+    }
+    .filtro-campo {
+        margin-bottom: 10px;
+    }
+    .filtro-campo label {
+        display: block;
+        margin-bottom: 5px;
+    }
+    .filtro-campo input[type="text"] {
+        width: 100%;
+        padding: 5px;
+        border: 1px solid #ddd;
+        border-radius: 3px;
+    }
+    .filtro-campo select {
+        width: 100%;
+        padding: 5px;
+        border: 1px solid #ddd;
+        border-radius: 3px;
+    }
+    .acoes-filtro {
+        margin-top: 15px;
+    }
+    .acoes-filtro button, .acoes-filtro a {
+        margin-right: 10px;
+    }
+    .tabela-container {
+        overflow-x: auto;
+    }
+    .pagination {
+        margin-top: 20px;
+        text-align: center;
+    }
+    .pagination a, .pagination span {
+        margin: 0 5px;
+    }
+    .filtro-destaque {
+        background-color: #f0f8ff;
+        border: 1px solid #b8d6f9;
+        padding: 10px;
+        margin-bottom: 15px;
+        border-radius: 5px;
+    }
+</style>
+
 <form method="get" action="{% url 'detalhe_edital' edital.id %}">
-    <div class="filtros">
-        {% for campo, valores in campos_filtro.items %}
+    <div class="filtros-container">
+        <!-- Filtro Unificado de Cidade do Polo (Destacado) -->
+        {% if cidades_disponiveis %}
+        <div class="filtro-destaque">
             <div class="filtro-campo">
-                <label for="filtro_{{ campo }}">{{ campo }}:</label>
-                <select name="filtro_{{ campo }}" id="filtro_{{ campo }}">
-                    <option value="">Todos</option>
-                    {% for valor in valores %}
-                        <option value="{{ valor }}" {% if valor == filtros_ativos|get_item:campo %}selected{% endif %}>{{ valor }}</option>
+                <label for="cidade_polo"><strong>Cidade do Polo:</strong></label>
+                <select name="cidade_polo" id="cidade_polo">
+                    <option value="">Todas as Cidades</option>
+                    {% for cidade in cidades_disponiveis %}
+                        <option value="{{ cidade }}" {% if cidade == cidade_polo_selecionada %}selected{% endif %}>
+                            {{ cidade }}
+                        </option>
                     {% endfor %}
                 </select>
+                <small style="display: block; margin-top: 5px; color: #666;">
+                    Este filtro unifica todos os polos (LP, LF, BSI, etc.) pela cidade, independentemente do curso.
+                </small>
             </div>
-        {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- Seção de Dados Pessoais (Campos de Texto) -->
+        {% if campos_texto %}
+        <div class="filtro-categoria">
+            <div class="filtro-categoria-header" onclick="toggleCategoria(this)">
+                Dados Pessoais <span class="toggle-icon">▼</span>
+            </div>
+            <div class="filtro-categoria-content">
+                {% for campo in campos_texto %}
+                    <div class="filtro-campo">
+                        <label for="texto_{{ campo }}">{{ campo }}:</label>
+                        <input type="text" name="texto_{{ campo }}" id="texto_{{ campo }}" 
+                               value="{{ filtros_texto|get_item:campo|default:'' }}" 
+                               placeholder="Digite para buscar...">
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Outros Filtros (Dropdowns) -->
+        {% if campos_dropdown %}
+        <div class="filtro-categoria">
+            <div class="filtro-categoria-header" onclick="toggleCategoria(this)">
+                Outros Filtros <span class="toggle-icon">▼</span>
+            </div>
+            <div class="filtro-categoria-content">
+                {% for campo in campos_dropdown %}
+                    {% if campos_filtro|get_item:campo and campo not in campos_polo %}
+                        <div class="filtro-campo">
+                            <label for="filtro_{{ campo }}">{{ campo }}:</label>
+                            <select name="filtro_{{ campo }}" id="filtro_{{ campo }}">
+                                <option value="">Todos</option>
+                                {% for valor in campos_filtro|get_item:campo %}
+                                    <option value="{{ valor }}" {% if valor == filtros_ativos|get_item:campo %}selected{% endif %}>{{ valor }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
     </div>
     
     <div class="acoes-filtro">
-        <button type="submit">Aplicar Filtros</button>
-        <a href="{% url 'detalhe_edital' edital.id %}">Limpar Filtros</a>
-        <a href="{% url 'download_edital_csv' edital.id %}?{{ request.GET.urlencode }}">Baixar Resultados Filtrados (CSV)</a>
+        <button type="submit" class="btn-primary">Aplicar Filtros</button>
+        <a href="{% url 'detalhe_edital' edital.id %}" class="btn-secondary">Limpar Filtros</a>
+        <a href="{% url 'download_edital_csv' edital.id %}?{{ request.GET.urlencode }}" class="btn-download">Baixar Resultados Filtrados (CSV)</a>
     </div>
 </form>
 
@@ -96,5 +212,47 @@
     {% csrf_token %}
     <button type="submit">Logout</button>
 </form>
+
+<script>
+    function toggleCategoria(element) {
+        var content = element.nextElementSibling;
+        content.classList.toggle('active');
+        
+        var icon = element.querySelector('.toggle-icon');
+        if (content.classList.contains('active')) {
+            icon.textContent = '▲';
+        } else {
+            icon.textContent = '▼';
+        }
+    }
+    
+    // Abrir a primeira categoria por padrão
+    document.addEventListener('DOMContentLoaded', function() {
+        var firstCategory = document.querySelector('.filtro-categoria-content');
+        if (firstCategory) {
+            firstCategory.classList.add('active');
+            var icon = firstCategory.previousElementSibling.querySelector('.toggle-icon');
+            if (icon) {
+                icon.textContent = '▲';
+            }
+        }
+        
+        // Abrir categorias que têm filtros ativos
+        var form = document.querySelector('form');
+        var inputs = form.querySelectorAll('input[type="text"], select');
+        inputs.forEach(function(input) {
+            if (input.value) {
+                var categoria = input.closest('.filtro-categoria-content');
+                if (categoria && !categoria.classList.contains('active')) {
+                    categoria.classList.add('active');
+                    var icon = categoria.previousElementSibling.querySelector('.toggle-icon');
+                    if (icon) {
+                        icon.textContent = '▲';
+                    }
+                }
+            }
+        });
+    });
+</script>
 
 {% endblock %}

@@ -11,6 +11,7 @@ import traceback # Import traceback for better error logging
 from django.http import HttpResponse # Needed for CSV download
 from collections import defaultdict
 from django.core.paginator import Paginator # Importação para paginação
+import re
 
 from .forms import EditalCSVUploadForm
 from .models import ImportedData, Edital
@@ -42,12 +43,10 @@ def home(request):
         # Se o edital existe e não foi confirmada a substituição, pedir confirmação
         if edital_existente and not confirmar_substituicao:
             uploader_original = edital_existente.uploaded_by.username if edital_existente.uploaded_by else "desconhecido"
-            # --- F-string CORRIGIDA (sem barras extras) --- 
             messages.warning(request, 
                              f"Já existe um edital '{edital_existente.get_tipo_display()} - {edital_existente.numero_ano}' "
                              f"carregado por '{uploader_original}'. "
                              f"Marque a caixa abaixo e clique em 'Upload CSV' novamente para substituí-lo.")
-            # --- FIM DA CORREÇÃO --- 
             form = EditalCSVUploadForm(initial=request.POST)
             return render(request, "home.html", {"form": form, "pedir_confirmacao": True, "edital_existente": edital_existente})
 
@@ -71,7 +70,6 @@ def home(request):
                     return redirect("home")
             
             io_string = io.StringIO(data_set)
-            # Usar DictReader (sem barras extras no quotechar)
             reader = csv.DictReader(io_string, delimiter=",", quotechar='"') 
             
             if not reader.fieldnames:
@@ -86,7 +84,6 @@ def home(request):
                     ImportedData.objects.filter(edital=edital).delete()
                     acao = "substituído"
                 else:
-                    # Usar get_or_create (sem barras extras na chave 'uploaded_by')
                     edital, created = Edital.objects.get_or_create(
                         tipo=tipo, 
                         numero_ano=numero_ano,
@@ -121,14 +118,12 @@ def home(request):
                 if dados_para_criar:
                     ImportedData.objects.bulk_create(dados_para_criar)
                 
-                # --- F-string CORRIGIDA (sem barras extras) --- 
                 messages.success(
                     request, 
                     f"Arquivo CSV {acao} com sucesso para o edital "
                     f"'{edital.get_tipo_display()} - {edital.numero_ano}'! "
                     f"{linhas_processadas} linhas importadas."
                 )
-                # --- FIM DA CORREÇÃO --- 
 
         except Exception as e:
             messages.error(request, f"Erro ao processar o arquivo CSV: {e}")
@@ -187,6 +182,18 @@ def download_edital_csv(request, edital_id):
 
     return response
 
+# Lista de palavras-chave para identificar campos de dados pessoais
+CAMPOS_DADOS_PESSOAIS = [
+    'nome', 'cpf', 'rg', 'identidade', 'documento', 'endereco', 'endereço', 
+    'email', 'e-mail', 'telefone', 'celular', 'contato', 'nascimento', 
+    'data de nascimento', 'filiação', 'mae', 'mãe', 'pai'
+]
+
+# Lista de palavras-chave para identificar campos de polo
+CAMPOS_POLO = [
+    'polo', 'pólo'
+]
+
 # Nova view para detalhe do edital com filtros dinâmicos
 @login_required
 def detalhe_edital(request, edital_id):
@@ -201,14 +208,20 @@ def detalhe_edital(request, edital_id):
         return redirect("listar_editais")
     
     # Identificar todos os campos disponíveis e seus valores únicos
-    campos_filtro = identificar_campos_filtro(todos_inscritos)
+    campos_filtro, campos_texto, campos_dropdown, campos_polo, cidades_disponiveis = identificar_campos_filtro(todos_inscritos)
     
     # Obter filtros ativos da query string
     filtros_ativos = {}
+    filtros_texto = {}
+    cidade_polo_selecionada = request.GET.get('cidade_polo', '')
+    
     for param, valor in request.GET.items():
         if param.startswith('filtro_') and valor:
             campo = param[7:]  # Remove 'filtro_' do início
             filtros_ativos[campo] = valor
+        elif param.startswith('texto_') and valor:
+            campo = param[6:]  # Remove 'texto_' do início
+            filtros_texto[campo] = valor
     
     # Filtrar inscritos com base nos filtros ativos
     inscritos = filtrar_inscritos(request, edital)
@@ -220,7 +233,6 @@ def detalhe_edital(request, edital_id):
             colunas.update(inscrito.dados_linha.keys())
     colunas = sorted(list(colunas))
 
-    inscritos = filtrar_inscritos(request, edital)
     paginator = Paginator(inscritos, 50)  # 50 itens por página
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
@@ -230,7 +242,13 @@ def detalhe_edital(request, edital_id):
         'inscritos': page_obj.object_list,
         'total_inscritos': total_inscritos,
         'campos_filtro': campos_filtro,
+        'campos_texto': campos_texto,
+        'campos_dropdown': campos_dropdown,
+        'campos_polo': campos_polo,
+        'cidades_disponiveis': cidades_disponiveis,
         'filtros_ativos': filtros_ativos,
+        'filtros_texto': filtros_texto,
+        'cidade_polo_selecionada': cidade_polo_selecionada,
         'colunas': colunas,
         'page_obj': page_obj,
     }
@@ -243,53 +261,151 @@ def identificar_campos_filtro(inscritos):
     """
     Identifica todos os campos disponíveis nos dados dos inscritos
     e seus valores únicos para criar filtros dinâmicos.
+    Separa campos de texto (dados pessoais) e campos dropdown.
+    Identifica campos de polo e extrai cidades disponíveis.
     """
     campos_valores = defaultdict(set)
+    campos_texto = set()
+    campos_dropdown = set()
+    campos_polo = set()
+    cidades_por_polo = {}
+    todas_cidades = set()
     
+    # Primeiro passo: coletar todos os campos e valores
     for inscrito in inscritos:
         if not isinstance(inscrito.dados_linha, dict):
             continue
             
         for campo, valor in inscrito.dados_linha.items():
-            # Ignorar campos vazios ou muito longos (provavelmente não são bons para filtrar)
-            if valor and isinstance(valor, str) and len(valor) < 100:
+            campo_lower = campo.lower()
+            
+            # Ignorar campos vazios ou muito longos
+            if not valor or not isinstance(valor, str) or len(valor) > 100:
+                continue
+                
+            # Verificar se é um campo de dados pessoais
+            if any(keyword in campo_lower for keyword in CAMPOS_DADOS_PESSOAIS):
+                campos_texto.add(campo)
+            else:
+                # Verificar se é um campo de polo
+                if any(keyword in campo_lower for keyword in CAMPOS_POLO):
+                    campos_polo.add(campo)
+                    
+                    # Extrair cidade do valor do polo
+                    cidade = extrair_cidade_do_polo(valor)
+                    if cidade:
+                        todas_cidades.add(cidade.strip())
+                
+                campos_dropdown.add(campo)
                 campos_valores[campo].add(valor)
     
+    # Ordenar as cidades alfabeticamente
+    cidades_disponiveis = sorted(list(todas_cidades))
+    
     # Converter sets para listas ordenadas
-    return {campo: sorted(list(valores)) for campo, valores in campos_valores.items()}
+    return {campo: sorted(list(valores)) for campo, valores in campos_valores.items()}, campos_texto, campos_dropdown, campos_polo, cidades_disponiveis
+
+
+def extrair_cidade_do_polo(valor_polo):
+    """
+    Extrai o nome da cidade de um valor de polo.
+    Exemplos:
+    - "LP - Recife" -> "Recife"
+    - "LF - GARANHUNS" -> "GARANHUNS"
+    - "BSI - Caruaru" -> "Caruaru"
+    """
+    # Padrão comum: Sigla - Cidade
+    padrao = r'[A-Z]+\s*-\s*(.+)'
+    match = re.search(padrao, valor_polo)
+    
+    if match:
+        return match.group(1).strip()
+    
+    # Se não encontrou no padrão comum, retorna o valor original
+    # (pode ser apenas o nome da cidade)
+    return valor_polo
+
 
 # Função auxiliar para filtrar inscritos com base nos parâmetros da query string
 def filtrar_inscritos(request, edital):
     """
     Filtra os inscritos de um edital com base nos filtros da query string.
+    Suporta:
+    - Filtros de texto (busca parcial)
+    - Filtros dropdown (valor exato)
+    - Filtro unificado de cidade do polo (busca em todos os campos de polo)
     """
     inscritos = ImportedData.objects.filter(edital=edital)
     
     # Se não há filtros ativos, retorna todos os inscritos
-    if not any(param.startswith('filtro_') for param in request.GET):
+    if not any(param.startswith(('filtro_', 'texto_', 'cidade_polo')) for param in request.GET):
         return inscritos
     
     # Lista para armazenar os IDs dos inscritos que atendem a todos os filtros
     ids_filtrados = []
     
+    # Verificar se há filtro de cidade do polo
+    cidade_polo = request.GET.get('cidade_polo', '')
+    
     # Processa cada inscrito para verificar se atende a todos os filtros
     for inscrito in inscritos:
+        if not isinstance(inscrito.dados_linha, dict):
+            continue
+            
         atende_todos_filtros = True
         
+        # Verificar filtros dropdown (valor exato)
         for param, valor in request.GET.items():
             if param.startswith('filtro_') and valor:
                 campo = param[7:]  # Remove 'filtro_' do início
                 
-                # Verifica se o inscrito tem o campo e se o valor corresponde ao filtro
-                if (not isinstance(inscrito.dados_linha, dict) or 
-                    campo not in inscrito.dados_linha or 
-                    inscrito.dados_linha[campo] != valor):
+                # Verificar se o inscrito tem o campo e se o valor corresponde ao filtro
+                if campo not in inscrito.dados_linha or inscrito.dados_linha[campo] != valor:
                     atende_todos_filtros = False
                     break
+        
+        # Se já falhou em algum filtro dropdown, não precisa verificar os outros
+        if not atende_todos_filtros:
+            continue
+        
+        # Verificar filtros de texto (busca parcial)
+        for param, valor in request.GET.items():
+            if param.startswith('texto_') and valor:
+                campo = param[6:]  # Remove 'texto_' do início
+                
+                # Verificar se o inscrito tem o campo e se o valor contém o texto buscado
+                if (campo not in inscrito.dados_linha or 
+                    valor.lower() not in inscrito.dados_linha[campo].lower()):
+                    atende_todos_filtros = False
+                    break
+        
+        # Se já falhou em algum filtro de texto, não precisa verificar o filtro de cidade
+        if not atende_todos_filtros:
+            continue
+        
+        # Verificar filtro unificado de cidade do polo
+        if cidade_polo:
+            atende_filtro_cidade = False
+            
+            # Verificar todos os campos do inscrito que podem ser campos de polo
+            for campo, valor in inscrito.dados_linha.items():
+                campo_lower = campo.lower()
+                
+                # Se é um campo de polo
+                if any(keyword in campo_lower for keyword in CAMPOS_POLO) and valor:
+                    # Extrair cidade do valor do polo
+                    cidade_extraida = extrair_cidade_do_polo(valor)
+                    
+                    # Comparar com a cidade selecionada (ignorando maiúsculas/minúsculas)
+                    if cidade_extraida and cidade_extraida.lower() == cidade_polo.lower():
+                        atende_filtro_cidade = True
+                        break
+            
+            if not atende_filtro_cidade:
+                atende_todos_filtros = False
         
         if atende_todos_filtros:
             ids_filtrados.append(inscrito.id)
     
     # Retorna apenas os inscritos que atendem a todos os filtros
     return inscritos.filter(id__in=ids_filtrados)
-
