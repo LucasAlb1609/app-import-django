@@ -12,6 +12,7 @@ from django.http import HttpResponse # Needed for CSV download
 from collections import defaultdict
 from django.core.paginator import Paginator # Importação para paginação
 import re
+import unicodedata # Para normalização de acentos
 
 from .forms import EditalCSVUploadForm
 from .models import ImportedData, Edital
@@ -194,6 +195,19 @@ CAMPOS_POLO = [
     'polo', 'pólo'
 ]
 
+# Função para remover acentos de uma string
+def remover_acentos(texto):
+    """
+    Remove acentos de uma string.
+    Exemplo: 'João' -> 'Joao', 'Gravatá' -> 'Gravata'
+    """
+    if not texto or not isinstance(texto, str):
+        return texto
+    
+    # Normaliza para a forma NFD e remove os caracteres de combinação
+    return ''.join(c for c in unicodedata.normalize('NFD', texto) 
+                  if unicodedata.category(c) != 'Mn')
+
 # Nova view para detalhe do edital com filtros dinâmicos
 @login_required
 def detalhe_edital(request, edital_id):
@@ -331,7 +345,7 @@ def filtrar_inscritos(request, edital):
     """
     Filtra os inscritos de um edital com base nos filtros da query string.
     Suporta:
-    - Filtros de texto (busca parcial)
+    - Filtros de texto (busca parcial, insensível a acentos)
     - Filtros dropdown (valor exato)
     - Filtro unificado de cidade do polo (busca em todos os campos de polo)
     """
@@ -346,6 +360,9 @@ def filtrar_inscritos(request, edital):
     
     # Verificar se há filtro de cidade do polo
     cidade_polo = request.GET.get('cidade_polo', '')
+    if cidade_polo:
+        # Normalizar a cidade do polo (remover acentos)
+        cidade_polo_normalizada = remover_acentos(cidade_polo.lower())
     
     # Processa cada inscrito para verificar se atende a todos os filtros
     for inscrito in inscritos:
@@ -368,14 +385,22 @@ def filtrar_inscritos(request, edital):
         if not atende_todos_filtros:
             continue
         
-        # Verificar filtros de texto (busca parcial)
+        # Verificar filtros de texto (busca parcial, insensível a acentos)
         for param, valor in request.GET.items():
             if param.startswith('texto_') and valor:
                 campo = param[6:]  # Remove 'texto_' do início
                 
-                # Verificar se o inscrito tem o campo e se o valor contém o texto buscado
-                if (campo not in inscrito.dados_linha or 
-                    valor.lower() not in inscrito.dados_linha[campo].lower()):
+                # Verificar se o inscrito tem o campo
+                if campo not in inscrito.dados_linha:
+                    atende_todos_filtros = False
+                    break
+                
+                # Normalizar o valor do campo e o valor buscado (remover acentos)
+                valor_campo_normalizado = remover_acentos(inscrito.dados_linha[campo].lower())
+                valor_busca_normalizado = remover_acentos(valor.lower())
+                
+                # Verificar se o valor normalizado do campo contém o valor normalizado buscado
+                if valor_busca_normalizado not in valor_campo_normalizado:
                     atende_todos_filtros = False
                     break
         
@@ -396,8 +421,11 @@ def filtrar_inscritos(request, edital):
                     # Extrair cidade do valor do polo
                     cidade_extraida = extrair_cidade_do_polo(valor)
                     
-                    # Comparar com a cidade selecionada (ignorando maiúsculas/minúsculas)
-                    if cidade_extraida and cidade_extraida.lower() == cidade_polo.lower():
+                    # Normalizar a cidade extraída (remover acentos)
+                    cidade_extraida_normalizada = remover_acentos(cidade_extraida.lower()) if cidade_extraida else ''
+                    
+                    # Comparar com a cidade selecionada (normalizada)
+                    if cidade_extraida_normalizada and cidade_polo_normalizada in cidade_extraida_normalizada:
                         atende_filtro_cidade = True
                         break
             
