@@ -93,11 +93,10 @@
 
 <form method="get" action="{% url 'detalhe_edital' edital.id %}">
     <div class="filtros-container">
-        <!-- Filtro Unificado de Cidade do Polo (Destacado) -->
         {% if cidades_disponiveis %}
         <div class="filtro-destaque">
             <div class="filtro-campo">
-                <label for="cidade_polo"><strong>Cidade do Polo:</strong></label>
+                <label for="cidade_polo"><strong>Cidade do Polo (Inscrição):</strong></label>
                 <select name="cidade_polo" id="cidade_polo">
                     <option value="">Todas as Cidades</option>
                     {% for cidade in cidades_disponiveis %}
@@ -113,7 +112,22 @@
         </div>
         {% endif %}
 
-        <!-- Seção de Dados Pessoais (Campos de Texto) -->
+        {% if valores_polo_origem %}
+        <div class="filtro-destaque">
+            <div class="filtro-campo">
+                <label for="polo_origem"><strong>Polo de Origem:</strong></label>
+                <select name="polo_origem" id="polo_origem">
+                    <option value="">Todos os Polos de Origem</option>
+                    {% for polo in valores_polo_origem %}
+                        <option value="{{ polo }}" {% if polo == polo_origem_selecionado %}selected{% endif %}>
+                            {{ polo }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        {% endif %}
+
         {% if campos_texto %}
         <div class="filtro-categoria">
             <div class="filtro-categoria-header" onclick="toggleCategoria(this)">
@@ -132,7 +146,6 @@
         </div>
         {% endif %}
 
-        <!-- Outros Filtros (Dropdowns) -->
         {% if campos_dropdown %}
         <div class="filtro-categoria">
             <div class="filtro-categoria-header" onclick="toggleCategoria(this)">
@@ -226,7 +239,6 @@
         }
     }
     
-    // Abrir a primeira categoria por padrão
     document.addEventListener('DOMContentLoaded', function() {
         var firstCategory = document.querySelector('.filtro-categoria-content');
         if (firstCategory) {
@@ -237,15 +249,14 @@
             }
         }
         
-        // Abrir categorias que têm filtros ativos
         var form = document.querySelector('form');
         var inputs = form.querySelectorAll('input[type="text"], select');
         inputs.forEach(function(input) {
             if (input.value) {
-                var categoria = input.closest('.filtro-categoria-content');
-                if (categoria && !categoria.classList.contains('active')) {
-                    categoria.classList.add('active');
-                    var icon = categoria.previousElementSibling.querySelector('.toggle-icon');
+                var categoriaContent = input.closest('.filtro-categoria-content');
+                if (categoriaContent && !categoriaContent.classList.contains('active')) {
+                    categoriaContent.classList.add('active');
+                    var icon = categoriaContent.previousElementSibling.querySelector('.toggle-icon');
                     if (icon) {
                         icon.textContent = '▲';
                     }
